@@ -63,6 +63,11 @@ func parseNginxEntry(entry string) {
 				Message: entry,
 				Level:   sentry.LevelInfo,
 			})
+
+			scope.SetLevel(sentry.LevelError)
+
+			scope.SetExtra("log_entry", entry)
+
 			sentry.CaptureMessage(values["err_message"])
 		})
 		sentry.Flush(5 * time.Second)
