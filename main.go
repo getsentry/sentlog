@@ -1,13 +1,16 @@
 package main
 
 import (
+	"bufio"
 	"fmt"
+	"log"
 	"os"
 	"sort"
 	"time"
 
 	"github.com/getsentry/sentry-go"
 	"github.com/vjeantet/grok"
+	"gopkg.in/alecthomas/kingpin.v2"
 )
 
 func printMap(m map[string]string) {
@@ -33,8 +36,7 @@ func parseNginxEntry(entry string) {
 		fmt.Printf("grok initialization failed: %v\n", err)
 	}
 
-	g.AddPattern("NGINX_TIMESTAMP", `%{DATE} %{TIME}`)
-	g.AddPattern("NGINX_ERROR_LOG", `%{NGINX_TIMESTAMP:timestamp} \[%{DATA:err_severity}\] (%{NUMBER:pid:int}#%{NUMBER}: \*%{NUMBER}|\*%{NUMBER}) %{DATA:err_message}(?:, client: "?%{IPORHOST:client}"?)(?:, server: %{IPORHOST:server})(?:, request: "%{WORD:verb} %{URIPATHPARAM:request} HTTP/%{NUMBER:httpversion}")?(?:, upstream: "%{DATA:upstream}")?(?:, host: "%{URIHOST:host}")?(?:, referrer: "%{URI:referrer}")?`)
+	g.AddPattern("NGINX_ERROR_LOG", `%{DATESTAMP:timestamp} \[%{DATA:err_severity}\] (%{NUMBER:pid:int}#%{NUMBER}: \*%{NUMBER}|\*%{NUMBER}) %{DATA:err_message}(?:, client: "?%{IPORHOST:client}"?)(?:, server: %{IPORHOST:server})(?:, request: "%{WORD:verb} %{URIPATHPARAM:request} HTTP/%{NUMBER:httpversion}")?(?:, upstream: "%{DATA:upstream}")?(?:, host: "%{URIHOST:host}")?(?:, referrer: "%{URI:referrer}")?`)
 
 	for index, entry := range entries {
 		fmt.Printf("\n\n--- Entry number %d\n", index)
@@ -74,25 +76,96 @@ func parseNginxEntry(entry string) {
 	}
 }
 
-func captureTest() {
-	_, err := os.Open("INVALID")
-	if err != nil {
-		fmt.Println("Capturing...")
-		eventID := sentry.CaptureException(err)
-		fmt.Println(*eventID)
+func InitSentry() {
+	dsn := os.Getenv("SENTLOG_SENTRY_DSN")
+	if dsn == "" {
+		fmt.Printf("No DSN found\n")
+		os.Exit(1)
 	}
-
-	sentry.Flush(time.Second * 5)
-}
-
-func main() {
-	fmt.Println("starting...")
-
 	err := sentry.Init(sentry.ClientOptions{})
 
 	if err != nil {
 		fmt.Printf("Sentry initialization failed: %v\n", err)
+		os.Exit(1)
+	}
+}
+
+func CaptureEvent(line string, values map[string]string) {
+	message := values["err_message"]
+	if message == "" {
+		message = line
 	}
 
-	parseNginxEntry("")
+	sentry.WithScope(func(scope *sentry.Scope) {
+		for key, value := range values {
+			if value == "" {
+				continue
+			}
+			scope.SetTag(key, value)
+		}
+
+		// Original log line
+		sentry.AddBreadcrumb(&sentry.Breadcrumb{
+			Message: line,
+			Level:   sentry.LevelInfo,
+		})
+
+		scope.SetLevel(sentry.LevelError)
+
+		scope.SetExtra("log_entry", line)
+
+		sentry.CaptureMessage(message)
+	})
+	sentry.Flush(5 * time.Second)
+}
+
+func ProcessLine(line string, g *grok.Grok) {
+	values, err := g.Parse("%{SENTLOG_DEFAULT_ENTRY}", line)
+	if err != nil {
+		fmt.Printf("grok parsing failed: %v\n", err)
+		os.Exit(1)
+	}
+
+	if len(values) == 0 {
+		return
+	}
+
+	CaptureEvent(line, values)
+	printMap(values)
+}
+
+func ProcessFile(filename string, pattern string) {
+	g, err := grok.NewWithConfig(&grok.Config{NamedCapturesOnly: true})
+	if err != nil {
+		fmt.Printf("grok initialization failed: %v\n", err)
+	}
+	AddDefaultPatterns(g)
+
+	g.AddPattern("SENTLOG_DEFAULT_ENTRY", pattern)
+
+	file, err := os.Open(filename) // For read access.
+	if err != nil {
+		log.Fatal(err)
+		os.Exit(1)
+	}
+	defer file.Close()
+
+	log.Printf("Opened %s", filename)
+
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		line := scanner.Text()
+		ProcessLine(line, g)
+	}
+}
+
+var (
+	file    = kingpin.Arg("file", "File to parse").Required().String()
+	pattern = kingpin.Flag("pattern", "Pattern to look for").Required().String()
+)
+
+func main() {
+	kingpin.Parse()
+	InitSentry()
+	ProcessFile(*file, *pattern)
 }
