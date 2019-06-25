@@ -26,7 +26,16 @@ func printMap(m map[string]string) {
 	}
 }
 
+func IsDryRun() bool {
+	return *dryRun
+}
+
 func InitSentry() {
+	if IsDryRun() {
+		log.Println("Dry-run mode enabled, not initializing Sentry client")
+		return
+	}
+
 	dsn := os.Getenv("SENTLOG_SENTRY_DSN")
 	if dsn == "" {
 		log.Fatal("No DSN found\n")
@@ -44,6 +53,10 @@ func CaptureEvent(line string, values map[string]string) {
 		message = line
 	}
 
+	if IsDryRun() {
+		return
+	}
+
 	sentry.WithScope(func(scope *sentry.Scope) {
 		for key, value := range values {
 			if value == "" {
@@ -51,12 +64,6 @@ func CaptureEvent(line string, values map[string]string) {
 			}
 			scope.SetTag(key, value)
 		}
-
-		// Original log line
-		sentry.AddBreadcrumb(&sentry.Breadcrumb{
-			Message: line,
-			Level:   sentry.LevelInfo,
-		})
 
 		scope.SetLevel(sentry.LevelError)
 
@@ -73,6 +80,14 @@ func ProcessLine(line string, pattern string, g *grok.Grok) {
 		os.Exit(1)
 	}
 
+	if !IsDryRun() {
+		// Original log line
+		sentry.AddBreadcrumb(&sentry.Breadcrumb{
+			Message: line,
+			Level:   sentry.LevelInfo,
+		})
+	}
+
 	if len(values) == 0 {
 		return
 	}
@@ -86,7 +101,7 @@ func ProcessLine(line string, pattern string, g *grok.Grok) {
 func ProcessFile(filename string, pattern string) {
 	g, err := grok.NewWithConfig(&grok.Config{NamedCapturesOnly: true})
 	if err != nil {
-		log.Fatal("grok initialization failed: %v\n", err)
+		log.Fatalf("grok initialization failed: %v\n", err)
 	}
 	AddDefaultPatterns(g)
 
@@ -105,16 +120,20 @@ func ProcessFile(filename string, pattern string) {
 		ProcessLine(line, pattern, g)
 	}
 
-	sentry.Flush(5 * time.Second)
+	if !IsDryRun() {
+		sentry.Flush(5 * time.Second)
+	}
 }
 
 var (
 	file    = kingpin.Arg("file", "File to parse").Required().String()
 	pattern = kingpin.Flag("pattern", "Pattern to look for").Required().String()
+	dryRun  = kingpin.Flag("dry-run", "Dry-run mode").Bool()
 )
 
 func main() {
 	kingpin.Parse()
+
 	InitSentry()
 	ProcessFile(*file, *pattern)
 }
