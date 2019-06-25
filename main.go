@@ -113,9 +113,16 @@ func ProcessFile(filename string, pattern string) {
 	file, err := os.Open(filename)
 	if err != nil {
 		log.Fatal(err)
-		os.Exit(1)
 	}
 	defer file.Close()
+
+	info, err := file.Stat()
+	if err != nil {
+		log.Fatal(err)
+	}
+	if info.IsDir() {
+		log.Fatal("Directory paths are not allowed, exiting")
+	}
 
 	log.Printf("Reading from \"%s\"", filename)
 
@@ -125,9 +132,7 @@ func ProcessFile(filename string, pattern string) {
 		ProcessLine(line, pattern, g)
 	}
 
-	if !IsDryRun() {
-		sentry.Flush(5 * time.Second)
-	}
+	sentry.Flush(5 * time.Second)
 }
 
 var (
