@@ -9,13 +9,17 @@ import (
 	"sort"
 	"time"
 
+	"github.com/araddon/dateparse"
 	"github.com/getsentry/sentry-go"
 	"github.com/hpcloud/tail"
 	"github.com/vjeantet/grok"
 	"gopkg.in/alecthomas/kingpin.v2"
 )
 
-func printMap(m map[string]string) {
+const MessageField = "message"
+const TimeStampField = "timestamp"
+
+func PrintMap(m map[string]string) {
 	keys := make([]string, 0, len(m))
 	for k := range m {
 		keys = append(keys, k)
@@ -24,8 +28,8 @@ func printMap(m map[string]string) {
 
 	for _, k := range keys {
 		fmt.Printf("%+15s: %s\n", k, m[k])
-
 	}
+	fmt.Println()
 }
 
 func IsDryRun() bool {
@@ -45,12 +49,12 @@ func InitSentry() {
 	err := sentry.Init(sentry.ClientOptions{})
 
 	if err != nil {
-		log.Fatal("Sentry initialization failed: %v\n", err)
+		log.Fatalf("Sentry initialization failed: %v\n", err)
 	}
 }
 
 func CaptureEvent(line string, values map[string]string) {
-	message := values["err_message"]
+	message := values[MessageField]
 	if message == "" {
 		message = line
 	}
@@ -75,6 +79,20 @@ func CaptureEvent(line string, values map[string]string) {
 	})
 }
 
+func ParseTimestamp(str string) int64 {
+	fallback := int64(0)
+	if str == "" {
+		return fallback
+	}
+
+	time, err := dateparse.ParseLocal(str)
+	if err != nil {
+		return fallback
+	}
+
+	return time.Unix()
+}
+
 func ProcessLine(line string, pattern string, g *grok.Grok) {
 	values, err := g.Parse(pattern, line)
 	if err != nil {
@@ -83,10 +101,14 @@ func ProcessLine(line string, pattern string, g *grok.Grok) {
 	}
 
 	if !IsDryRun() {
+		// Attempt to parse the timestamp
+		timestamp := ParseTimestamp(values[TimeStampField])
+
 		// Original log line
 		sentry.AddBreadcrumb(&sentry.Breadcrumb{
-			Message: line,
-			Level:   sentry.LevelInfo,
+			Message:   line,
+			Level:     sentry.LevelInfo,
+			Timestamp: timestamp,
 		})
 	}
 
@@ -96,8 +118,8 @@ func ProcessLine(line string, pattern string, g *grok.Grok) {
 
 	CaptureEvent(line, values)
 
-	log.Println(">>> Entry:")
-	printMap(values)
+	log.Println("Entry found:")
+	PrintMap(values)
 }
 
 func InitGrokProcessor() *grok.Grok {
@@ -157,14 +179,16 @@ func ProcessFile(filename string, pattern string) {
 		}
 	}
 
-	t, err := tail.TailFile(
+	follow := !*noFollow
+	tailFile, err := tail.TailFile(
 		filename,
 		tail.Config{
-			Follow:   !*noFollow,
+			Follow:   follow,
 			Location: &seekInfo,
+			ReOpen:   follow,
 		})
 
-	for line := range t.Lines {
+	for line := range tailFile.Lines {
 		ProcessLine(line.Text, pattern, g)
 
 	}
