@@ -119,8 +119,8 @@ func CaptureEvent(line string, values map[string]string) {
 	sentry.Flush(5 * time.Second)
 }
 
-func ProcessLine(line string, g *grok.Grok) {
-	values, err := g.Parse("%{SENTLOG_DEFAULT_ENTRY}", line)
+func ProcessLine(line string, pattern string, g *grok.Grok) {
+	values, err := g.Parse(pattern, line)
 	if err != nil {
 		fmt.Printf("grok parsing failed: %v\n", err)
 		os.Exit(1)
@@ -131,6 +131,7 @@ func ProcessLine(line string, g *grok.Grok) {
 	}
 
 	CaptureEvent(line, values)
+	fmt.Println("\n>>> Entry:")
 	printMap(values)
 }
 
@@ -140,8 +141,6 @@ func ProcessFile(filename string, pattern string) {
 		fmt.Printf("grok initialization failed: %v\n", err)
 	}
 	AddDefaultPatterns(g)
-
-	g.AddPattern("SENTLOG_DEFAULT_ENTRY", pattern)
 
 	file, err := os.Open(filename) // For read access.
 	if err != nil {
@@ -155,7 +154,7 @@ func ProcessFile(filename string, pattern string) {
 	scanner := bufio.NewScanner(file)
 	for scanner.Scan() {
 		line := scanner.Text()
-		ProcessLine(line, g)
+		ProcessLine(line, pattern, g)
 	}
 }
 
