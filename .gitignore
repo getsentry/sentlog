@@ -65,3 +65,4 @@ Temporary Items
 # End of https://www.gitignore.io/api/go,linux,macos
 
 .env
+.vscode
