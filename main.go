@@ -3,12 +3,14 @@ package main
 import (
 	"bufio"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"sort"
 	"time"
 
 	"github.com/getsentry/sentry-go"
+	"github.com/hpcloud/tail"
 	"github.com/vjeantet/grok"
 	"gopkg.in/alecthomas/kingpin.v2"
 )
@@ -124,22 +126,59 @@ func ProcessFile(filename string, pattern string) {
 		log.Fatal("Directory paths are not allowed, exiting")
 	}
 
-	log.Printf("Reading from \"%s\"", filename)
+	log.Printf("Reading from file \"%s\"", filename)
 
-	scanner := bufio.NewScanner(file)
-	for scanner.Scan() {
-		line := scanner.Text()
-		ProcessLine(line, pattern, g)
+	var seekInfo tail.SeekInfo
+	if *fromLineNumber < 0 {
+		// By default: from the end
+		seekInfo = tail.SeekInfo{
+			Offset: 0,
+			Whence: io.SeekEnd,
+		}
+	} else {
+		// Seek to the line number
+		scanner := bufio.NewScanner(file)
+		pos := int64(0)
+		scanLines := func(data []byte, atEOF bool) (advance int, token []byte, err error) {
+			advance, token, err = bufio.ScanLines(data, atEOF)
+			pos += int64(advance)
+			return
+		}
+		scanner.Split(scanLines)
+		for i := 0; i < *fromLineNumber; i++ {
+			dataAvailable := scanner.Scan()
+			if !dataAvailable {
+				break
+			}
+		}
+		seekInfo = tail.SeekInfo{
+			Offset: pos,
+			Whence: io.SeekStart,
+		}
+	}
+
+	t, err := tail.TailFile(
+		filename,
+		tail.Config{
+			Follow:   !*noFollow,
+			Location: &seekInfo,
+		})
+
+	for line := range t.Lines {
+		ProcessLine(line.Text, pattern, g)
+
 	}
 
 	sentry.Flush(5 * time.Second)
 }
 
 var (
-	file     = kingpin.Arg("file", "File to parse").Required().String()
-	pattern  = kingpin.Flag("pattern", "Pattern to look for").Required().String()
-	dryRun   = kingpin.Flag("dry-run", "Dry-run mode").Bool()
-	noFollow = kingpin.Flag("no-follow", "Do not wait for the new data").Bool()
+	file           = kingpin.Arg("file", "File to parse").Required().String()
+	pattern        = kingpin.Flag("pattern", "Pattern to look for").Required().String()
+	dryRun         = kingpin.Flag("dry-run", "Dry-run mode").Bool()
+	noFollow       = kingpin.Flag("no-follow", "Do not wait for the new data").Bool()
+	maxEvents      = kingpin.Flag("max-events", "Exit after the given number of events are processed").Int()
+	fromLineNumber = kingpin.Flag("from-line", "Start reading from this line number").Default("-1").Int()
 )
 
 func main() {
