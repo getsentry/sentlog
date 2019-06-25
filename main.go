@@ -98,21 +98,26 @@ func ProcessLine(line string, pattern string, g *grok.Grok) {
 	printMap(values)
 }
 
-func ProcessFile(filename string, pattern string) {
+func InitGrokProcessor() *grok.Grok {
 	g, err := grok.NewWithConfig(&grok.Config{NamedCapturesOnly: true})
 	if err != nil {
 		log.Fatalf("grok initialization failed: %v\n", err)
 	}
 	AddDefaultPatterns(g)
+	return g
+}
 
-	file, err := os.Open(filename) // For read access.
+func ProcessFile(filename string, pattern string) {
+	g := InitGrokProcessor()
+
+	file, err := os.Open(filename)
 	if err != nil {
 		log.Fatal(err)
 		os.Exit(1)
 	}
 	defer file.Close()
 
-	log.Printf("Opened \"%s\"", filename)
+	log.Printf("Reading from \"%s\"", filename)
 
 	scanner := bufio.NewScanner(file)
 	for scanner.Scan() {
@@ -126,9 +131,10 @@ func ProcessFile(filename string, pattern string) {
 }
 
 var (
-	file    = kingpin.Arg("file", "File to parse").Required().String()
-	pattern = kingpin.Flag("pattern", "Pattern to look for").Required().String()
-	dryRun  = kingpin.Flag("dry-run", "Dry-run mode").Bool()
+	file     = kingpin.Arg("file", "File to parse").Required().String()
+	pattern  = kingpin.Flag("pattern", "Pattern to look for").Required().String()
+	dryRun   = kingpin.Flag("dry-run", "Dry-run mode").Bool()
+	noFollow = kingpin.Flag("no-follow", "Do not wait for the new data").Bool()
 )
 
 func main() {
