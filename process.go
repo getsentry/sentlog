@@ -71,16 +71,25 @@ func ParseTimestamp(str string) int64 {
 	return time.Unix()
 }
 
-func ProcessLine(line string, pattern string, g *grok.Grok) {
-	values, err := g.Parse(pattern, line)
-	if err != nil {
-		log.Printf("grok parsing failed: %v\n", err)
-		os.Exit(1)
+func ProcessLine(line string, patterns []string, g *grok.Grok) {
+	parsedValues := make(map[string]string)
+
+	// Try all patterns
+	for _, pattern := range patterns {
+		values, err := g.Parse(pattern, line)
+		if err != nil {
+			log.Fatalf("grok parsing failed: %v\n", err)
+		}
+
+		if len(values) != 0 {
+			parsedValues = values
+			break
+		}
 	}
 
 	if !IsDryRun() {
 		// Attempt to parse the timestamp
-		timestamp := ParseTimestamp(values[TimeStampField])
+		timestamp := ParseTimestamp(parsedValues[TimeStampField])
 
 		// Original log line
 		sentry.AddBreadcrumb(&sentry.Breadcrumb{
@@ -90,14 +99,14 @@ func ProcessLine(line string, pattern string, g *grok.Grok) {
 		})
 	}
 
-	if len(values) == 0 {
+	if len(parsedValues) == 0 {
 		return
 	}
 
-	CaptureEvent(line, values)
+	CaptureEvent(line, parsedValues)
 
 	log.Println("Entry found:")
-	PrintMap(values)
+	PrintMap(parsedValues)
 }
 
 func InitGrokProcessor() *grok.Grok {
@@ -109,10 +118,8 @@ func InitGrokProcessor() *grok.Grok {
 	return g
 }
 
-func ProcessFile(filename string, pattern string) {
-	g := InitGrokProcessor()
-
-	file, err := os.Open(filename)
+func ProcessFile(fileInput *FileInputConfig, g *grok.Grok) {
+	file, err := os.Open(fileInput.File)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -126,7 +133,7 @@ func ProcessFile(filename string, pattern string) {
 		log.Fatal("Directory paths are not allowed, exiting")
 	}
 
-	log.Printf("Reading input from file \"%s\"", filename)
+	log.Printf("Reading input from file \"%s\"", fileInput.File)
 
 	var seekInfo tail.SeekInfo
 	if *args.fromLineNumber < 0 {
@@ -159,7 +166,7 @@ func ProcessFile(filename string, pattern string) {
 
 	follow := !*args.noFollow
 	tailFile, err := tail.TailFile(
-		filename,
+		fileInput.File,
 		tail.Config{
 			Follow:   follow,
 			Location: &seekInfo,
@@ -167,9 +174,31 @@ func ProcessFile(filename string, pattern string) {
 		})
 
 	for line := range tailFile.Lines {
-		ProcessLine(line.Text, pattern, g)
+		ProcessLine(line.Text, fileInput.Patterns, g)
 
 	}
 
 	sentry.Flush(5 * time.Second)
+}
+
+func RunWithConfig(config *Config) {
+	g := InitGrokProcessor()
+
+	// Load patterns
+	for _, filename := range config.PatternFiles {
+		err := ReadPatternsFromFile(g, filename)
+		if err != nil {
+			log.Fatal(err)
+		}
+		log.Printf("Loaded additional patterns from \"%s\"\n", filename)
+	}
+
+	if len(config.Inputs) == 0 {
+		log.Fatalln("No file inputs specified, exiting.")
+	}
+
+	// Process file inputs
+	for _, fileInput := range config.Inputs {
+		ProcessFile(&fileInput, g)
+	}
 }

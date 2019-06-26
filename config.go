@@ -7,19 +7,18 @@ import (
 	"gopkg.in/yaml.v2"
 )
 
+type FileInputConfig struct {
+	File           string
+	Follow         *bool
+	FromLineNumber *int `yaml:"from_line_number"`
+	Patterns       []string
+	Tags           map[string]string
+}
+
 type Config struct {
 	SentryDsn    string   `yaml:"sentry_dsn"`
 	PatternFiles []string `yaml:"pattern_files"`
-	Inputs       []struct {
-		File           string
-		Follow         *bool // Optional value
-		HelperPatterns []struct {
-			Name  string
-			Value string
-		} `yaml:"helper_patterns"`
-		Patterns []string
-		Tags     map[string]string
-	}
+	Inputs       []FileInputConfig
 }
 
 func ReadConfigFromFile(filename string) (*Config, error) {
