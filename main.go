@@ -9,21 +9,21 @@ import (
 )
 
 type CmdArgs struct {
-	file           *string
-	pattern        *string
-	dryRun         *bool
-	noFollow       *bool
-	maxEvents      *int
+	file     *string
+	pattern  *string
+	dryRun   *bool
+	noFollow *bool
+	// maxEvents      *int
 	fromLineNumber *int
 }
 
 var (
 	args = CmdArgs{
-		file:           kingpin.Arg("file", "File to parse").Required().String(),
-		pattern:        kingpin.Flag("pattern", "Pattern to look for").Required().String(),
-		dryRun:         kingpin.Flag("dry-run", "Dry-run mode").Bool(),
-		noFollow:       kingpin.Flag("no-follow", "Do not wait for the new data").Bool(),
-		maxEvents:      kingpin.Flag("max-events", "Exit after the given number of events are processed").Int(),
+		file:     kingpin.Arg("file", "File to parse").Required().String(),
+		pattern:  kingpin.Flag("pattern", "Pattern to look for").Required().String(),
+		dryRun:   kingpin.Flag("dry-run", "Dry-run mode").Bool(),
+		noFollow: kingpin.Flag("no-follow", "Do not wait for the new data").Bool(),
+		// maxEvents:      kingpin.Flag("max-events", "Exit after the given number of events are processed").Int(),
 		fromLineNumber: kingpin.Flag("from-line", "Start reading from this line number").Default("-1").Int(),
 	}
 )
