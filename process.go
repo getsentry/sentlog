@@ -7,6 +7,7 @@ import (
 	"log"
 	"os"
 	"sort"
+	"sync"
 	"time"
 
 	"github.com/araddon/dateparse"
@@ -17,6 +18,8 @@ import (
 
 const MessageField = "message"
 const TimeStampField = "timestamp"
+
+var wg sync.WaitGroup
 
 func PrintMap(m map[string]string) {
 	keys := make([]string, 0, len(m))
@@ -72,7 +75,7 @@ func ParseTimestamp(str string) int64 {
 }
 
 func ProcessLine(line string, patterns []string, g *grok.Grok) {
-	parsedValues := make(map[string]string)
+	var parsedValues map[string]string
 
 	// Try all patterns
 	for _, pattern := range patterns {
@@ -119,6 +122,8 @@ func InitGrokProcessor() *grok.Grok {
 }
 
 func ProcessFile(fileInput *FileInputConfig, g *grok.Grok) {
+	defer wg.Done()
+
 	file, err := os.Open(fileInput.File)
 	if err != nil {
 		log.Fatal(err)
@@ -135,8 +140,13 @@ func ProcessFile(fileInput *FileInputConfig, g *grok.Grok) {
 
 	log.Printf("Reading input from file \"%s\"", fileInput.File)
 
+	fromLineNumber := -1
+	if fileInput.FromLineNumber != nil {
+		fromLineNumber = *fileInput.FromLineNumber
+	}
+
 	var seekInfo tail.SeekInfo
-	if *args.fromLineNumber < 0 {
+	if fromLineNumber < 0 {
 		// By default: from the end
 		seekInfo = tail.SeekInfo{
 			Offset: 0,
@@ -152,7 +162,7 @@ func ProcessFile(fileInput *FileInputConfig, g *grok.Grok) {
 			return
 		}
 		scanner.Split(scanLines)
-		for i := 0; i < *args.fromLineNumber; i++ {
+		for i := 0; i < fromLineNumber; i++ {
 			dataAvailable := scanner.Scan()
 			if !dataAvailable {
 				break
@@ -164,7 +174,11 @@ func ProcessFile(fileInput *FileInputConfig, g *grok.Grok) {
 		}
 	}
 
-	follow := !*args.noFollow
+	follow := true
+	if fileInput.Follow != nil {
+		follow = *fileInput.Follow
+	}
+
 	tailFile, err := tail.TailFile(
 		fileInput.File,
 		tail.Config{
@@ -199,6 +213,9 @@ func RunWithConfig(config *Config) {
 
 	// Process file inputs
 	for _, fileInput := range config.Inputs {
-		ProcessFile(&fileInput, g)
+		wg.Add(1)
+		go ProcessFile(&fileInput, g)
 	}
+
+	wg.Wait()
 }

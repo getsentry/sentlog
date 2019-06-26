@@ -19,19 +19,11 @@ type CmdArgs struct {
 }
 
 var (
-	args = CmdArgs{
-		file:     kingpin.Arg("file", "File to parse").String(),
-		pattern:  kingpin.Flag("pattern", "Pattern to look for").String(),
-		dryRun:   kingpin.Flag("dry-run", "Dry-run mode").Bool(),
-		noFollow: kingpin.Flag("no-follow", "Do not wait for the new data").Bool(),
-		// maxEvents:      kingpin.Flag("max-events", "Exit after the given number of events are processed").Int(),
-		fromLineNumber: kingpin.Flag("from-line", "Start reading from this line number").Default("-1").Int(),
-		config:         kingpin.Flag("config", "Path to the configuration").String(),
-	}
+	_isDryRun bool
 )
 
 func IsDryRun() bool {
-	return *args.dryRun
+	return _isDryRun
 }
 
 func InitSentry(config *Config) {
@@ -59,9 +51,20 @@ func InitSentry(config *Config) {
 }
 
 func main() {
-	kingpin.Parse()
+	args := CmdArgs{
+		file:     kingpin.Arg("file", "File to parse").String(),
+		pattern:  kingpin.Flag("pattern", "Pattern to look for").String(),
+		dryRun:   kingpin.Flag("dry-run", "Dry-run mode").Bool(),
+		noFollow: kingpin.Flag("no-follow", "Do not wait for the new data").Bool(),
+		// maxEvents:      kingpin.Flag("max-events", "Exit after the given number of events are processed").Int(),
+		fromLineNumber: kingpin.Flag("from-line", "Start reading from this line number").Default("-1").Int(),
+		config:         kingpin.Flag("config", "Path to the configuration").String(),
+	}
 
-	config := &Config{}
+	kingpin.Parse()
+	_isDryRun = *args.dryRun
+
+	var config *Config
 
 	if *args.config == "" {
 		log.Println("Using parameters from the command line")
