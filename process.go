@@ -103,7 +103,7 @@ func ProcessLine(line string, pattern string, g *grok.Grok) {
 func InitGrokProcessor() *grok.Grok {
 	g, err := grok.NewWithConfig(&grok.Config{NamedCapturesOnly: true})
 	if err != nil {
-		log.Fatalf("grok initialization failed: %v\n", err)
+		log.Fatalf("Grok engine initialization failed: %v\n", err)
 	}
 	AddDefaultPatterns(g)
 	return g
@@ -126,7 +126,7 @@ func ProcessFile(filename string, pattern string) {
 		log.Fatal("Directory paths are not allowed, exiting")
 	}
 
-	log.Printf("Reading from file \"%s\"", filename)
+	log.Printf("Reading input from file \"%s\"", filename)
 
 	var seekInfo tail.SeekInfo
 	if *args.fromLineNumber < 0 {
