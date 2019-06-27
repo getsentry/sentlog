@@ -84,12 +84,18 @@ func main() {
 	}
 
 	kingpin.Parse()
+	log.Println("Hey there, sentlog here")
+
 	_isDryRun = *args.dryRun
 	_verbose = *args.verbose
 
 	var config *Config
 
 	if *args.config == "" {
+		if *args.pattern == "" || *args.file == "" {
+			log.Fatalln("Both file and pattern have to be specified, aborting")
+		}
+
 		log.Println("Using parameters from the command line")
 		follow := !*args.noFollow
 		config = &Config{
@@ -106,7 +112,7 @@ func main() {
 	} else {
 		log.Println("Using parameters from the configuration file")
 		if *args.pattern != "" || *args.file != "" {
-			log.Fatalln("No pattern/file allowed when configuration file is provided, exiting.")
+			log.Fatalln("No pattern/file allowed when configuration file is provided, aborting")
 		}
 
 		configPath := *args.config
