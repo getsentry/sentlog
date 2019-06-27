@@ -25,12 +25,12 @@ var (
 	_isDryRun bool
 )
 
-func IsDryRun() bool {
+func isDryRun() bool {
 	return _isDryRun
 }
 
 func initSentry(config *Config) {
-	if IsDryRun() {
+	if isDryRun() {
 		log.Println("Dry-run mode enabled, not initializing Sentry client")
 		return
 	}
@@ -112,5 +112,5 @@ func main() {
 
 	initSentry(config)
 	catchInterrupt()
-	RunWithConfig(config)
+	runWithConfig(config)
 }

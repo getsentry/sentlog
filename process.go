@@ -22,7 +22,7 @@ const TimeStampField = "timestamp"
 
 var wg sync.WaitGroup
 
-func PrintMap(m map[string]string) {
+func printMap(m map[string]string) {
 	keys := make([]string, 0, len(m))
 	for k := range m {
 		keys = append(keys, k)
@@ -35,8 +35,8 @@ func PrintMap(m map[string]string) {
 	fmt.Println()
 }
 
-func CaptureEvent(line string, values map[string]string, hub *sentry.Hub) {
-	if IsDryRun() {
+func captureEvent(line string, values map[string]string, hub *sentry.Hub) {
+	if isDryRun() {
 		return
 	}
 
@@ -46,7 +46,7 @@ func CaptureEvent(line string, values map[string]string, hub *sentry.Hub) {
 	}
 
 	// Attempt to parse the timestamp
-	timestamp := ParseTimestamp(values[TimeStampField])
+	timestamp := parseTimestamp(values[TimeStampField])
 
 	hub.WithScope(func(scope *sentry.Scope) {
 		for key, value := range values {
@@ -68,7 +68,7 @@ func CaptureEvent(line string, values map[string]string, hub *sentry.Hub) {
 	})
 }
 
-func ParseTimestamp(str string) int64 {
+func parseTimestamp(str string) int64 {
 	fallback := int64(0)
 	if str == "" {
 		return fallback
@@ -82,7 +82,7 @@ func ParseTimestamp(str string) int64 {
 	return time.Unix()
 }
 
-func ProcessLine(line string, patterns []string, g *grok.Grok, hub *sentry.Hub) {
+func processLine(line string, patterns []string, g *grok.Grok, hub *sentry.Hub) {
 	var parsedValues map[string]string
 
 	// Try all patterns
@@ -102,13 +102,13 @@ func ProcessLine(line string, patterns []string, g *grok.Grok, hub *sentry.Hub) 
 		return
 	}
 
-	CaptureEvent(line, parsedValues, hub)
+	captureEvent(line, parsedValues, hub)
 
 	log.Println("Entry found:")
-	PrintMap(parsedValues)
+	printMap(parsedValues)
 }
 
-func InitGrokProcessor() *grok.Grok {
+func initGrokProcessor() *grok.Grok {
 	g, err := grok.NewWithConfig(&grok.Config{NamedCapturesOnly: true})
 	if err != nil {
 		log.Fatalf("Grok engine initialization failed: %v\n", err)
@@ -117,7 +117,7 @@ func InitGrokProcessor() *grok.Grok {
 	return g
 }
 
-func GetSeekInfo(file *os.File, fromLineNumber int) tail.SeekInfo {
+func getSeekInfo(file *os.File, fromLineNumber int) tail.SeekInfo {
 	if fromLineNumber < 0 {
 		// By default: from the end
 		return tail.SeekInfo{
@@ -147,7 +147,7 @@ func GetSeekInfo(file *os.File, fromLineNumber int) tail.SeekInfo {
 	}
 }
 
-func ProcessFile(fileInput *FileInputConfig, g *grok.Grok) {
+func processFile(fileInput *FileInputConfig, g *grok.Grok) {
 	defer wg.Done()
 
 	file, err := os.Open(fileInput.File)
@@ -178,7 +178,7 @@ func ProcessFile(fileInput *FileInputConfig, g *grok.Grok) {
 		fromLineNumber = *fileInput.FromLineNumber
 	}
 
-	seekInfo := GetSeekInfo(file, fromLineNumber)
+	seekInfo := getSeekInfo(file, fromLineNumber)
 
 	follow := true
 	if fileInput.Follow != nil {
@@ -199,14 +199,14 @@ func ProcessFile(fileInput *FileInputConfig, g *grok.Grok) {
 			Level:   sentry.LevelInfo,
 		}, nil)
 
-		ProcessLine(line.Text, fileInput.Patterns, g, hub)
+		processLine(line.Text, fileInput.Patterns, g, hub)
 	}
 
 	hub.Flush(10 * time.Second)
 }
 
-func RunWithConfig(config *Config) {
-	g := InitGrokProcessor()
+func runWithConfig(config *Config) {
+	g := initGrokProcessor()
 
 	// Load patterns
 	for _, filename := range config.PatternFiles {
@@ -224,7 +224,7 @@ func RunWithConfig(config *Config) {
 	// Process file inputs
 	for _, fileInput := range config.Inputs {
 		wg.Add(1)
-		go ProcessFile(&fileInput, g)
+		go processFile(&fileInput, g)
 	}
 
 	wg.Wait()
