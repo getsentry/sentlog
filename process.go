@@ -200,16 +200,19 @@ func processFile(fileInput *FileInputConfig, g *grok.Grok) {
 		})
 
 	for line := range tailFile.Lines {
-		hub.AddBreadcrumb(&sentry.Breadcrumb{
-			Message: line.Text,
-			Level:   sentry.LevelInfo,
-		}, nil)
-
 		hub.WithScope(func(_ *sentry.Scope) {
 			processLine(line.Text, fileInput.Patterns, g, hub)
 		})
+
+		if !isDryRun() {
+			hub.AddBreadcrumb(&sentry.Breadcrumb{
+				Message: line.Text,
+				Level:   sentry.LevelInfo,
+			}, nil)
+		}
 	}
 
+	log.Printf("Finished reading from \"%s\", flushing events...\n", fileInput.File)
 	hub.Flush(10 * time.Second)
 }
 
