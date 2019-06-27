@@ -6,6 +6,7 @@ import (
 	"io"
 	"log"
 	"os"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"sync"
@@ -96,6 +97,7 @@ func processLine(line string, patterns []string, g *grok.Grok, hub *sentry.Hub) 
 
 		if len(values) != 0 {
 			parsedValues = values
+			hub.Scope().SetExtra("pattern", pattern)
 			break
 		}
 	}
@@ -156,7 +158,11 @@ func getSeekInfo(file *os.File, fromLineNumber int) tail.SeekInfo {
 func processFile(fileInput *FileInputConfig, g *grok.Grok) {
 	defer wg.Done()
 
-	file, err := os.Open(fileInput.File)
+	absFilePath, err := filepath.Abs(fileInput.File)
+	if err != nil {
+		log.Fatal(err)
+	}
+	file, err := os.Open(absFilePath)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -170,14 +176,13 @@ func processFile(fileInput *FileInputConfig, g *grok.Grok) {
 		log.Fatal("Directory paths are not allowed, exiting")
 	}
 
-	log.Printf("Reading input from file \"%s\"", fileInput.File)
+	log.Printf("Reading input from file \"%s\"", absFilePath)
 
 	// One hub per file/goroutine
 	hub := sentry.CurrentHub().Clone()
 	scope := hub.PushScope()
-	for key, value := range fileInput.Tags {
-		scope.SetTag(key, value)
-	}
+	scope.SetTag("file_input_path", absFilePath)
+	scope.SetTags(fileInput.Tags)
 
 	fromLineNumber := -1
 	if fileInput.FromLineNumber != nil {
@@ -192,7 +197,7 @@ func processFile(fileInput *FileInputConfig, g *grok.Grok) {
 	}
 
 	tailFile, err := tail.TailFile(
-		fileInput.File,
+		absFilePath,
 		tail.Config{
 			Follow:   follow,
 			Location: &seekInfo,
@@ -212,7 +217,7 @@ func processFile(fileInput *FileInputConfig, g *grok.Grok) {
 		}
 	}
 
-	log.Printf("Finished reading from \"%s\", flushing events...\n", fileInput.File)
+	log.Printf("Finished reading from \"%s\", flushing events...\n", absFilePath)
 	hub.Flush(10 * time.Second)
 }
 
@@ -233,7 +238,7 @@ func runWithConfig(config *Config) {
 	}
 
 	if len(config.Inputs) == 0 {
-		log.Fatalln("No file inputs specified, exiting.")
+		log.Fatalln("No file inputs specified, aborting")
 	}
 
 	// Process file inputs
