@@ -16,6 +16,7 @@ type CmdArgs struct {
 	pattern  *string
 	dryRun   *bool
 	noFollow *bool
+	verbose  *bool
 	// maxEvents      *int
 	fromLineNumber *int
 	config         *string
@@ -23,10 +24,15 @@ type CmdArgs struct {
 
 var (
 	_isDryRun bool
+	_verbose  bool
 )
 
 func isDryRun() bool {
 	return _isDryRun
+}
+
+func isVerbose() bool {
+	return _verbose
 }
 
 func initSentry(config *Config) {
@@ -69,15 +75,17 @@ func main() {
 	args := CmdArgs{
 		file:     kingpin.Arg("file", "File to parse").String(),
 		pattern:  kingpin.Flag("pattern", "Pattern to look for").String(),
-		dryRun:   kingpin.Flag("dry-run", "Dry-run mode").Bool(),
+		dryRun:   kingpin.Flag("dry-run", "Dry-run mode").Default("false").Bool(),
 		noFollow: kingpin.Flag("no-follow", "Do not wait for the new data").Bool(),
 		// maxEvents:      kingpin.Flag("max-events", "Exit after the given number of events are processed").Int(),
 		fromLineNumber: kingpin.Flag("from-line", "Start reading from this line number").Default("-1").Int(),
-		config:         kingpin.Flag("config", "Path to the configuration").String(),
+		config:         kingpin.Flag("config", "Path to the configuration").Short('c').String(),
+		verbose:        kingpin.Flag("verbose", "Print every match").Short('v').Default("false").Bool(),
 	}
 
 	kingpin.Parse()
 	_isDryRun = *args.dryRun
+	_verbose = *args.verbose
 
 	var config *Config
 

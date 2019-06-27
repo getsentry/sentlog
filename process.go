@@ -22,6 +22,8 @@ const TimeStampField = "timestamp"
 
 var wg sync.WaitGroup
 
+var printMutex sync.Mutex
+
 func printMap(m map[string]string) {
 	keys := make([]string, 0, len(m))
 	for k := range m {
@@ -48,24 +50,24 @@ func captureEvent(line string, values map[string]string, hub *sentry.Hub) {
 	// Attempt to parse the timestamp
 	timestamp := parseTimestamp(values[TimeStampField])
 
-	hub.WithScope(func(scope *sentry.Scope) {
-		for key, value := range values {
-			if value == "" {
-				continue
-			}
-			scope.SetTag(key, value)
+	scope := hub.Scope()
+
+	for key, value := range values {
+		if value == "" {
+			continue
 		}
+		scope.SetTag(key, value)
+	}
 
-		if timestamp != 0 {
-			scope.SetTag("parsed_timestamp", strconv.FormatInt(timestamp, 10))
-		}
+	if timestamp != 0 {
+		scope.SetTag("parsed_timestamp", strconv.FormatInt(timestamp, 10))
+	}
 
-		scope.SetLevel(sentry.LevelError)
+	scope.SetLevel(sentry.LevelError)
 
-		scope.SetExtra("log_entry", line)
+	scope.SetExtra("log_entry", line)
 
-		hub.CaptureMessage(message)
-	})
+	hub.CaptureMessage(message)
 }
 
 func parseTimestamp(str string) int64 {
@@ -104,8 +106,12 @@ func processLine(line string, patterns []string, g *grok.Grok, hub *sentry.Hub) 
 
 	captureEvent(line, parsedValues, hub)
 
-	log.Println("Entry found:")
-	printMap(parsedValues)
+	if isVerbose() {
+		printMutex.Lock()
+		log.Println("Entry found:")
+		printMap(parsedValues)
+		printMutex.Unlock()
+	}
 }
 
 func initGrokProcessor() *grok.Grok {
@@ -199,13 +205,19 @@ func processFile(fileInput *FileInputConfig, g *grok.Grok) {
 			Level:   sentry.LevelInfo,
 		}, nil)
 
-		processLine(line.Text, fileInput.Patterns, g, hub)
+		hub.WithScope(func(_ *sentry.Scope) {
+			processLine(line.Text, fileInput.Patterns, g, hub)
+		})
 	}
 
 	hub.Flush(10 * time.Second)
 }
 
 func runWithConfig(config *Config) {
+	if isVerbose() {
+		log.Println("Verbose mode enabled, printing every match")
+	}
+
 	g := initGrokProcessor()
 
 	// Load patterns
