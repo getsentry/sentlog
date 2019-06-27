@@ -12,12 +12,11 @@ import (
 )
 
 type CmdArgs struct {
-	file     *string
-	pattern  *string
-	dryRun   *bool
-	noFollow *bool
-	verbose  *bool
-	// maxEvents      *int
+	file           *string
+	pattern        *string
+	dryRun         *bool
+	noFollow       *bool
+	verbose        *bool
 	fromLineNumber *int
 	config         *string
 }
@@ -73,11 +72,10 @@ func catchInterrupt() {
 
 func main() {
 	args := CmdArgs{
-		file:     kingpin.Arg("file", "File to parse").String(),
-		pattern:  kingpin.Flag("pattern", "Pattern to look for").String(),
-		dryRun:   kingpin.Flag("dry-run", "Dry-run mode").Default("false").Bool(),
-		noFollow: kingpin.Flag("no-follow", "Do not wait for the new data").Bool(),
-		// maxEvents:      kingpin.Flag("max-events", "Exit after the given number of events are processed").Int(),
+		file:           kingpin.Arg("file", "File to parse").String(),
+		pattern:        kingpin.Flag("pattern", "Pattern to look for").Short('p').String(),
+		dryRun:         kingpin.Flag("dry-run", "Dry-run mode").Default("false").Bool(),
+		noFollow:       kingpin.Flag("no-follow", "Do not wait for the new data").Bool(),
 		fromLineNumber: kingpin.Flag("from-line", "Start reading from this line number").Default("-1").Int(),
 		config:         kingpin.Flag("config", "Path to the configuration").Short('c').String(),
 		verbose:        kingpin.Flag("verbose", "Print every match").Short('v').Default("false").Bool(),
