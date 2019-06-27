@@ -7,6 +7,7 @@ import (
 	"log"
 	"os"
 	"sort"
+	"strconv"
 	"sync"
 	"time"
 
@@ -34,17 +35,20 @@ func PrintMap(m map[string]string) {
 	fmt.Println()
 }
 
-func CaptureEvent(line string, values map[string]string) {
+func CaptureEvent(line string, values map[string]string, hub *sentry.Hub) {
+	if IsDryRun() {
+		return
+	}
+
 	message := values[MessageField]
 	if message == "" {
 		message = line
 	}
 
-	if IsDryRun() {
-		return
-	}
+	// Attempt to parse the timestamp
+	timestamp := ParseTimestamp(values[TimeStampField])
 
-	sentry.WithScope(func(scope *sentry.Scope) {
+	hub.WithScope(func(scope *sentry.Scope) {
 		for key, value := range values {
 			if value == "" {
 				continue
@@ -52,11 +56,15 @@ func CaptureEvent(line string, values map[string]string) {
 			scope.SetTag(key, value)
 		}
 
+		if timestamp != 0 {
+			scope.SetTag("parsed_timestamp", strconv.FormatInt(timestamp, 10))
+		}
+
 		scope.SetLevel(sentry.LevelError)
 
 		scope.SetExtra("log_entry", line)
 
-		sentry.CaptureMessage(message)
+		hub.CaptureMessage(message)
 	})
 }
 
@@ -74,7 +82,7 @@ func ParseTimestamp(str string) int64 {
 	return time.Unix()
 }
 
-func ProcessLine(line string, patterns []string, g *grok.Grok) {
+func ProcessLine(line string, patterns []string, g *grok.Grok, hub *sentry.Hub) {
 	var parsedValues map[string]string
 
 	// Try all patterns
@@ -90,23 +98,11 @@ func ProcessLine(line string, patterns []string, g *grok.Grok) {
 		}
 	}
 
-	if !IsDryRun() {
-		// Attempt to parse the timestamp
-		timestamp := ParseTimestamp(parsedValues[TimeStampField])
-
-		// Original log line
-		sentry.AddBreadcrumb(&sentry.Breadcrumb{
-			Message:   line,
-			Level:     sentry.LevelInfo,
-			Timestamp: timestamp,
-		})
-	}
-
 	if len(parsedValues) == 0 {
 		return
 	}
 
-	CaptureEvent(line, parsedValues)
+	CaptureEvent(line, parsedValues, hub)
 
 	log.Println("Entry found:")
 	PrintMap(parsedValues)
@@ -119,6 +115,36 @@ func InitGrokProcessor() *grok.Grok {
 	}
 	AddDefaultPatterns(g)
 	return g
+}
+
+func GetSeekInfo(file *os.File, fromLineNumber int) tail.SeekInfo {
+	if fromLineNumber < 0 {
+		// By default: from the end
+		return tail.SeekInfo{
+			Offset: 0,
+			Whence: io.SeekEnd,
+		}
+	} else {
+		// Seek to the line number
+		scanner := bufio.NewScanner(file)
+		pos := int64(0)
+		scanLines := func(data []byte, atEOF bool) (advance int, token []byte, err error) {
+			advance, token, err = bufio.ScanLines(data, atEOF)
+			pos += int64(advance)
+			return
+		}
+		scanner.Split(scanLines)
+		for i := 0; i < fromLineNumber; i++ {
+			dataAvailable := scanner.Scan()
+			if !dataAvailable {
+				break
+			}
+		}
+		return tail.SeekInfo{
+			Offset: pos,
+			Whence: io.SeekStart,
+		}
+	}
 }
 
 func ProcessFile(fileInput *FileInputConfig, g *grok.Grok) {
@@ -140,39 +166,19 @@ func ProcessFile(fileInput *FileInputConfig, g *grok.Grok) {
 
 	log.Printf("Reading input from file \"%s\"", fileInput.File)
 
+	// One hub per file/goroutine
+	hub := sentry.CurrentHub().Clone()
+	scope := hub.PushScope()
+	for key, value := range fileInput.Tags {
+		scope.SetTag(key, value)
+	}
+
 	fromLineNumber := -1
 	if fileInput.FromLineNumber != nil {
 		fromLineNumber = *fileInput.FromLineNumber
 	}
 
-	var seekInfo tail.SeekInfo
-	if fromLineNumber < 0 {
-		// By default: from the end
-		seekInfo = tail.SeekInfo{
-			Offset: 0,
-			Whence: io.SeekEnd,
-		}
-	} else {
-		// Seek to the line number
-		scanner := bufio.NewScanner(file)
-		pos := int64(0)
-		scanLines := func(data []byte, atEOF bool) (advance int, token []byte, err error) {
-			advance, token, err = bufio.ScanLines(data, atEOF)
-			pos += int64(advance)
-			return
-		}
-		scanner.Split(scanLines)
-		for i := 0; i < fromLineNumber; i++ {
-			dataAvailable := scanner.Scan()
-			if !dataAvailable {
-				break
-			}
-		}
-		seekInfo = tail.SeekInfo{
-			Offset: pos,
-			Whence: io.SeekStart,
-		}
-	}
+	seekInfo := GetSeekInfo(file, fromLineNumber)
 
 	follow := true
 	if fileInput.Follow != nil {
@@ -188,11 +194,15 @@ func ProcessFile(fileInput *FileInputConfig, g *grok.Grok) {
 		})
 
 	for line := range tailFile.Lines {
-		ProcessLine(line.Text, fileInput.Patterns, g)
+		hub.AddBreadcrumb(&sentry.Breadcrumb{
+			Message: line.Text,
+			Level:   sentry.LevelInfo,
+		}, nil)
 
+		ProcessLine(line.Text, fileInput.Patterns, g, hub)
 	}
 
-	sentry.Flush(5 * time.Second)
+	hub.Flush(10 * time.Second)
 }
 
 func RunWithConfig(config *Config) {

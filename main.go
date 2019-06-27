@@ -3,6 +3,9 @@ package main
 import (
 	"log"
 	"os"
+	"os/signal"
+	"syscall"
+	"time"
 
 	"github.com/getsentry/sentry-go"
 	"gopkg.in/alecthomas/kingpin.v2"
@@ -26,7 +29,7 @@ func IsDryRun() bool {
 	return _isDryRun
 }
 
-func InitSentry(config *Config) {
+func initSentry(config *Config) {
 	if IsDryRun() {
 		log.Println("Dry-run mode enabled, not initializing Sentry client")
 		return
@@ -48,6 +51,18 @@ func InitSentry(config *Config) {
 	if err != nil {
 		log.Fatalf("Sentry initialization failed: %v\n", err)
 	}
+}
+
+// Catches Ctrl-C
+func catchInterrupt() {
+	c := make(chan os.Signal)
+	signal.Notify(c, os.Interrupt, syscall.SIGINT)
+	go func() {
+		<-c
+		log.Println("Cleaning up...")
+		sentry.Flush(5 * time.Second)
+		os.Exit(1)
+	}()
 }
 
 func main() {
@@ -95,6 +110,7 @@ func main() {
 		log.Printf("Configuration file loaded: \"%s\"\n", configPath)
 	}
 
-	InitSentry(config)
+	initSentry(config)
+	catchInterrupt()
 	RunWithConfig(config)
 }
