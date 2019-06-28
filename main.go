@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -73,10 +74,20 @@ func catchInterrupt() {
 }
 
 func initLogging() {
-
 	log.SetFormatter(&logrus.TextFormatter{
 		FullTimestamp: true,
 	})
+
+	var logLevel = logrus.InfoLevel
+
+	logLevelEnv := strings.ToLower(os.Getenv("SENTLOG_LOG_LEVEL"))
+	switch logLevelEnv {
+	case "debug":
+		logLevel = logrus.DebugLevel
+	case "info":
+		logLevel = logrus.InfoLevel
+	}
+	log.SetLevel(logLevel)
 }
 
 func showGreeting() {
@@ -84,6 +95,8 @@ func showGreeting() {
 }
 
 func main() {
+	initLogging()
+
 	args := CmdArgs{
 		file:           kingpin.Arg("file", "File to parse").String(),
 		pattern:        kingpin.Flag("pattern", "Pattern to look for").Short('p').String(),
@@ -93,10 +106,7 @@ func main() {
 		config:         kingpin.Flag("config", "Path to the configuration").Short('c').String(),
 		verbose:        kingpin.Flag("verbose", "Print every match").Short('v').Default("false").Bool(),
 	}
-
 	kingpin.Parse()
-
-	initLogging()
 
 	showGreeting()
 
