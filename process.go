@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"fmt"
 	"io"
-	"log"
 	"os"
 	"path/filepath"
 	"sort"
@@ -21,8 +20,10 @@ import (
 const MessageField = "message"
 const TimeStampField = "timestamp"
 
+// Used to coordinate per-file goroutines we spawn
 var wg sync.WaitGroup
 
+// Mutex for logging
 var printMutex sync.Mutex
 
 func printMap(m map[string]string) {
@@ -202,6 +203,7 @@ func processFile(fileInput *FileInputConfig, g *grok.Grok) {
 			Follow:   follow,
 			Location: &seekInfo,
 			ReOpen:   follow,
+			Logger:   log,
 		})
 
 	for line := range tailFile.Lines {

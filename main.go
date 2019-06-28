@@ -1,13 +1,13 @@
 package main
 
 import (
-	"log"
 	"os"
 	"os/signal"
 	"syscall"
 	"time"
 
 	"github.com/getsentry/sentry-go"
+	"github.com/sirupsen/logrus"
 	"gopkg.in/alecthomas/kingpin.v2"
 )
 
@@ -25,6 +25,8 @@ var (
 	_isDryRun bool
 	_verbose  bool
 )
+
+var log = logrus.New()
 
 func isDryRun() bool {
 	return _isDryRun
@@ -70,6 +72,17 @@ func catchInterrupt() {
 	}()
 }
 
+func initLogging() {
+
+	log.SetFormatter(&logrus.TextFormatter{
+		FullTimestamp: true,
+	})
+}
+
+func showGreeting() {
+
+}
+
 func main() {
 	args := CmdArgs{
 		file:           kingpin.Arg("file", "File to parse").String(),
@@ -82,7 +95,10 @@ func main() {
 	}
 
 	kingpin.Parse()
-	log.Println("Hey there, sentlog here")
+
+	initLogging()
+
+	showGreeting()
 
 	_isDryRun = *args.dryRun
 	_verbose = *args.verbose

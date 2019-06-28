@@ -8,6 +8,7 @@ require (
 	github.com/araddon/dateparse v0.0.0-20190622164848-0fb0a474d195
 	github.com/getsentry/sentry-go v0.1.1-0.20190624124141-69c26e4dfca8
 	github.com/hpcloud/tail v1.0.1-0.20180514194441-a1dbeea552b7
+	github.com/sirupsen/logrus v1.4.2
 	github.com/vjeantet/grok v1.0.1-0.20180213041522-5a86c829f3c3
 	golang.org/x/sys v0.0.0-20190624142023-c5567b49c5d0 // indirect
 	gopkg.in/alecthomas/kingpin.v2 v2.2.6
