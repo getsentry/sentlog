@@ -1,0 +1,40 @@
+name: continuous-integration
+
+on:
+  pull_request:
+    branches:
+      - '*'
+  push:
+    branches:
+      - main
+      - master # backward compatibility
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
+
+env:
+  SHELL: /bin/bash
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  test-vroom:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v3
+        with:
+          go-version: 'stable'
+      - run: go test -v -cover ./...
+      - name: TruffleHog OSS
+        uses: trufflesecurity/trufflehog@v3.16.4
+        with:
+          path: ./
+          base: ${{ github.event.repository.default_branch }}
+          head: HEAD
+          extra_args: --debug --only-verified
