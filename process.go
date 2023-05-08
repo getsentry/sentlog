@@ -122,7 +122,10 @@ func initGrokProcessor() *grok.Grok {
 	if err != nil {
 		log.Fatalf("Grok engine initialization failed: %v\n", err)
 	}
-	AddDefaultPatterns(g)
+
+	if err := AddDefaultPatterns(g); err != nil {
+		log.Fatalf("Processing default patterns: %v\n", err)
+	}
 	return g
 }
 

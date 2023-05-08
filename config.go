@@ -1,10 +1,9 @@
 package main
 
 import (
-	"io/ioutil"
 	"os"
 
-	"gopkg.in/yaml.v2"
+	"gopkg.in/yaml.v3"
 )
 
 type FileInputConfig struct {
@@ -28,10 +27,10 @@ func ReadConfigFromFile(filename string) (*Config, error) {
 	}
 	defer file.Close()
 
-	data, err := ioutil.ReadAll(file)
 	config := Config{}
-	err = yaml.UnmarshalStrict([]byte(data), &config)
-
+	decoder := yaml.NewDecoder(file)
+	decoder.KnownFields(true)
+	err = decoder.Decode(&config)
 	if err != nil {
 		return &config, err
 	}
