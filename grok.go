@@ -6,6 +6,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/rs/zerolog/log"
 	"github.com/vjeantet/grok"
 )
 
@@ -31,7 +32,7 @@ func ReadPatternsFromFile(g *grok.Grok, filename string) error {
 	}
 	defer file.Close()
 
-	log.Printf("Adding grok patterns from \"%s\"", filename)
+	log.Info().Msgf("Adding grok patterns from \"%s\"", filename)
 	scanner := bufio.NewScanner(file)
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())

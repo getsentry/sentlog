@@ -4,12 +4,14 @@ import (
 	"os"
 	"os/signal"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
 	"github.com/alecthomas/kingpin/v2"
 	"github.com/getsentry/sentry-go"
-	"github.com/sirupsen/logrus"
+	"github.com/rs/zerolog"
+	"github.com/rs/zerolog/log"
 )
 
 type CmdArgs struct {
@@ -20,26 +22,25 @@ type CmdArgs struct {
 	verbose        *bool
 	fromLineNumber *int
 	config         *string
+	debug          *bool
 }
 
 var (
 	_isDryRun bool
-	_verbose  bool
+	// _verbose if enabled, will print every debug level log.
+	_verbose bool
+	// _killed is used to specifying whether the program received
+	// a signal to stop and restart the sentlog instance.
+	_killed bool
 )
-
-var log = logrus.New()
 
 func isDryRun() bool {
 	return _isDryRun
 }
 
-func isVerbose() bool {
-	return _verbose
-}
-
 func initSentry(config *Config) {
 	if isDryRun() {
-		log.Println("Dry-run mode enabled, not initializing Sentry client")
+		log.Info().Msg("Dry-run mode enabled, not initializing Sentry client")
 		return
 	}
 
@@ -51,52 +52,69 @@ func initSentry(config *Config) {
 		dsn = os.Getenv("SENTLOG_SENTRY_DSN")
 	}
 
-	if dsn == "" {
-		log.Fatal("No DSN found\n")
-	}
-
-	err := sentry.Init(sentry.ClientOptions{Dsn: dsn})
+	err := sentry.Init(sentry.ClientOptions{Dsn: dsn, DebugWriter: log.Logger})
 	if err != nil {
-		log.Fatalf("Sentry initialization failed: %v\n", err)
+		log.Fatal().Err(err).Msg("Sentry initialization failed")
 	}
-}
-
-// Catches Ctrl-C
-func catchInterrupt() {
-	c := make(chan os.Signal, 1)
-	signal.Notify(c, os.Interrupt, syscall.SIGINT)
-	go func() {
-		<-c
-		log.Println("Cleaning up...")
-		sentry.Flush(5 * time.Second)
-		os.Exit(1)
-	}()
 }
 
 func initLogging() {
-	log.SetFormatter(&logrus.TextFormatter{
-		FullTimestamp: true,
+	log.Logger = log.Output(zerolog.ConsoleWriter{
+		Out: os.Stderr,
 	})
 
-	var logLevel = logrus.InfoLevel
-
 	logLevelEnv := strings.ToLower(os.Getenv("SENTLOG_LOG_LEVEL"))
-	switch logLevelEnv {
-	case "debug":
-		logLevel = logrus.DebugLevel
-	case "info":
-		logLevel = logrus.InfoLevel
+	if _verbose {
+		logLevelEnv = "debug"
 	}
-	log.SetLevel(logLevel)
-}
 
-func showGreeting() {
-
+	switch logLevelEnv {
+	case "trace":
+		log.Logger = log.Sample(zerolog.LevelSampler{
+			TraceSampler: &logSamplerEnable{},
+			DebugSampler: &logSamplerEnable{},
+			InfoSampler:  &logSamplerEnable{},
+			WarnSampler:  &logSamplerEnable{},
+			ErrorSampler: &logSamplerEnable{},
+		})
+	case "debug":
+		log.Logger = log.Sample(zerolog.LevelSampler{
+			TraceSampler: &logSamplerDisable{},
+			DebugSampler: &logSamplerEnable{},
+			InfoSampler:  &logSamplerEnable{},
+			WarnSampler:  &logSamplerEnable{},
+			ErrorSampler: &logSamplerEnable{},
+		})
+	case "warn":
+		log.Logger = log.Sample(zerolog.LevelSampler{
+			TraceSampler: &logSamplerDisable{},
+			DebugSampler: &logSamplerDisable{},
+			InfoSampler:  &logSamplerDisable{},
+			WarnSampler:  &logSamplerEnable{},
+			ErrorSampler: &logSamplerEnable{},
+		})
+	case "error":
+		log.Logger = log.Sample(zerolog.LevelSampler{
+			TraceSampler: &logSamplerDisable{},
+			DebugSampler: &logSamplerDisable{},
+			InfoSampler:  &logSamplerDisable{},
+			WarnSampler:  &logSamplerDisable{},
+			ErrorSampler: &logSamplerEnable{},
+		})
+	case "info":
+		fallthrough
+	default:
+		log.Logger = log.Sample(zerolog.LevelSampler{
+			TraceSampler: &logSamplerDisable{},
+			DebugSampler: &logSamplerDisable{},
+			InfoSampler:  &logSamplerEnable{},
+			WarnSampler:  &logSamplerEnable{},
+			ErrorSampler: &logSamplerEnable{},
+		})
+	}
 }
 
 func main() {
-	initLogging()
-
 	args := CmdArgs{
 		file:           kingpin.Arg("file", "File to parse").String(),
 		pattern:        kingpin.Flag("pattern", "Pattern to look for").Short('p').String(),
@@ -108,19 +126,21 @@ func main() {
 	}
 	kingpin.Parse()
 
-	showGreeting()
-
+	// Assign every global variable first
 	_isDryRun = *args.dryRun
 	_verbose = *args.verbose
+
+	// Initiate logging
+	initLogging()
 
 	var config *Config
 
 	if *args.config == "" {
 		if *args.pattern == "" || *args.file == "" {
-			log.Fatalln("Both file and pattern have to be specified, aborting")
+			log.Fatal().Msg("Both file and pattern have to be specified, aborting")
 		}
 
-		log.Println("Using parameters from the command line")
+		log.Info().Msg("Using parameters from the command line")
 		follow := !*args.noFollow
 		config = &Config{
 			SentryDsn: "",
@@ -134,21 +154,77 @@ func main() {
 			},
 		}
 	} else {
-		log.Println("Using parameters from the configuration file")
+		log.Info().Msg("Using parameters from the configuration file")
 		if *args.pattern != "" || *args.file != "" {
-			log.Fatalln("No pattern/file allowed when configuration file is provided, aborting")
+			log.Fatal().Msg("No pattern/file allowed when configuration file is provided, aborting")
 		}
 
 		configPath := *args.config
 		parsedConfig, err := ReadConfigFromFile(configPath)
 		if err != nil {
-			log.Fatal(err)
+			log.Fatal().Err(err).Msg("Failed reading configuration from file")
 		}
 		config = parsedConfig
-		log.Printf("Configuration file loaded: \"%s\"\n", configPath)
+		log.Info().Msgf("Configuration file loaded: \"%s\"\n", configPath)
 	}
 
 	initSentry(config)
-	catchInterrupt()
-	runWithConfig(config)
+
+	// Create global condition
+	cond := sync.NewCond(&sync.Mutex{})
+
+	// Listen to interrupt/termination signal.
+	// Once received, this will exit the program.
+	exitSignal := make(chan os.Signal, 1)
+	signal.Notify(exitSignal, syscall.SIGTERM, os.Interrupt, os.Kill)
+
+	// Start the main program
+	log.Debug().Msg("Starting sentlog")
+	go runWithConfig(config, cond)
+
+	// Listen to SIGHUP for handling graceful restarts.
+	// This is most useful on avoiding logrotate not be able to rotate the log file.
+	// It's an unbuffered channel, you can send SIGHUP multiple times.
+	usrStopSignal := make(chan os.Signal)
+	signal.Notify(usrStopSignal, syscall.SIGHUP)
+	go func() {
+		for {
+			log.Debug().Msg("Waiting for SIGHUP")
+			<-usrStopSignal
+
+			log.Debug().Msg("Received SIGHUP")
+			cond.L.Lock()
+			_killed = true
+			cond.Broadcast()
+			cond.L.Unlock()
+
+			log.Debug().Msg("Sleeping for 10 seconds")
+			// NOTE: should this be configurable in the future?
+			time.Sleep(time.Second * 10)
+			log.Debug().Msg("Thread woke up, setting kill switch to false")
+
+			cond.L.Lock()
+			_killed = false
+			cond.L.Unlock()
+
+			// Spawn new instance of the main application
+			log.Debug().Msg("Starting sentlog")
+			go runWithConfig(config, cond)
+		}
+	}()
+
+	log.Debug().Msg("Waiting for Interrupt signal")
+	<-exitSignal
+
+	log.Debug().Msg("Interrupt received")
+	// Handle graceful exit
+	cond.L.Lock()
+	_killed = true
+	cond.Broadcast()
+	cond.L.Unlock()
+
+	log.Debug().Msg("Cleaning up...")
+	// Sleep for 1 second to allow other goroutine to flush and exit properly
+	time.Sleep(time.Second)
+	sentry.Flush(5 * time.Second)
 }

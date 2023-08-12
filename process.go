@@ -2,11 +2,9 @@ package main
 
 import (
 	"bufio"
-	"fmt"
 	"io"
 	"os"
 	"path/filepath"
-	"sort"
 	"strconv"
 	"sync"
 	"time"
@@ -14,30 +12,12 @@ import (
 	"github.com/araddon/dateparse"
 	"github.com/getsentry/sentry-go"
 	"github.com/hpcloud/tail"
+	"github.com/rs/zerolog/log"
 	"github.com/vjeantet/grok"
 )
 
 const MessageField = "message"
 const TimeStampField = "timestamp"
-
-// Used to coordinate per-file goroutines we spawn
-var wg sync.WaitGroup
-
-// Mutex for logging
-var printMutex sync.Mutex
-
-func printMap(m map[string]string) {
-	keys := make([]string, 0, len(m))
-	for k := range m {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-
-	for _, k := range keys {
-		fmt.Printf("%+15s: %s\n", k, m[k])
-	}
-	fmt.Println()
-}
 
 func captureEvent(line string, values map[string]string, hub *sentry.Hub) {
 	if isDryRun() {
@@ -78,12 +58,12 @@ func parseTimestamp(str string) int64 {
 		return fallback
 	}
 
-	time, err := dateparse.ParseLocal(str)
+	localTime, err := dateparse.ParseLocal(str)
 	if err != nil {
 		return fallback
 	}
 
-	return time.Unix()
+	return localTime.Unix()
 }
 
 func processLine(line string, patterns []string, g *grok.Grok, hub *sentry.Hub) {
@@ -93,7 +73,7 @@ func processLine(line string, patterns []string, g *grok.Grok, hub *sentry.Hub) 
 	for _, pattern := range patterns {
 		values, err := g.Parse(pattern, line)
 		if err != nil {
-			log.Fatalf("grok parsing failed: %v\n", err)
+			log.Fatal().Err(err).Msg("grok parsing failed")
 		}
 
 		if len(values) != 0 {
@@ -109,22 +89,17 @@ func processLine(line string, patterns []string, g *grok.Grok, hub *sentry.Hub) 
 
 	captureEvent(line, parsedValues, hub)
 
-	if isVerbose() {
-		printMutex.Lock()
-		log.Println("Entry found:")
-		printMap(parsedValues)
-		printMutex.Unlock()
-	}
+	log.Debug().Any("parsed_values", parsedValues).Msg("Entry found")
 }
 
 func initGrokProcessor() *grok.Grok {
 	g, err := grok.NewWithConfig(&grok.Config{NamedCapturesOnly: true})
 	if err != nil {
-		log.Fatalf("Grok engine initialization failed: %v\n", err)
+		log.Fatal().Err(err).Msg("Grok engine initialization failed")
 	}
 
 	if err := AddDefaultPatterns(g); err != nil {
-		log.Fatalf("Processing default patterns: %v\n", err)
+		log.Fatal().Err(err).Msg("Processing default patterns")
 	}
 	return g
 }
@@ -159,28 +134,37 @@ func getSeekInfo(file *os.File, fromLineNumber int) tail.SeekInfo {
 	}
 }
 
-func processFile(fileInput *FileInputConfig, g *grok.Grok) {
-	defer wg.Done()
-
+func processFile(fileInput *FileInputConfig, g *grok.Grok, cond *sync.Cond) {
 	absFilePath, err := filepath.Abs(fileInput.File)
 	if err != nil {
-		log.Fatal(err)
+		log.Fatal().Err(err).Msgf("Getting absolute file path of %q", fileInput.File)
 	}
+
+	log.Debug().Str("path", absFilePath).Msg("Opening file")
+
 	file, err := os.Open(absFilePath)
 	if err != nil {
-		log.Fatal(err)
+		log.Fatal().Err(err).Msg("Opening file")
 	}
-	defer file.Close()
+	defer func() {
+		log.Debug().Str("path", absFilePath).Msg("Closing file")
+
+		err := file.Close()
+		if err != nil {
+			log.Error().Err(err).Str("path", absFilePath).Msg("Closing file")
+		}
+	}()
 
 	info, err := file.Stat()
 	if err != nil {
-		log.Fatal(err)
-	}
-	if info.IsDir() {
-		log.Fatal("Directory paths are not allowed, exiting")
+		log.Fatal().Err(err).Msg("Executing file stat operation")
 	}
 
-	log.Printf("Reading input from file \"%s\"", absFilePath)
+	if info.IsDir() {
+		log.Fatal().Msg("Directory paths are not allowed, exiting")
+	}
+
+	log.Info().Msgf("Reading input from file %q", absFilePath)
 
 	// One hub per file/goroutine
 	hub := sentry.CurrentHub().Clone()
@@ -206,30 +190,49 @@ func processFile(fileInput *FileInputConfig, g *grok.Grok) {
 			Follow:   follow,
 			Location: &seekInfo,
 			ReOpen:   follow,
-			Logger:   log,
 		})
-
-	for line := range tailFile.Lines {
-		hub.WithScope(func(_ *sentry.Scope) {
-			processLine(line.Text, fileInput.Patterns, g, hub)
-		})
-
-		if !isDryRun() {
-			hub.AddBreadcrumb(&sentry.Breadcrumb{
-				Message: line.Text,
-				Level:   sentry.LevelInfo,
-			}, nil)
+	defer func() {
+		log.Debug().Str("path", absFilePath).Msg("Stop tailing")
+		err := tailFile.Stop()
+		if err != nil {
+			log.Error().Err(err).Str("path", absFilePath).Msg("Stop tailing file")
 		}
-	}
 
-	log.Printf("Finished reading from \"%s\", flushing events...\n", absFilePath)
+		tailFile.Cleanup()
+	}()
+
+	// Run the tail function on a separate goroutine,
+	// so current processFile can wait for a kill signal broadcast.
+	go func() {
+		log.Debug().Str("file", fileInput.File).Msg("Start tailing file")
+		for line := range tailFile.Lines {
+			hub.WithScope(func(_ *sentry.Scope) {
+				processLine(line.Text, fileInput.Patterns, g, hub)
+			})
+
+			if !isDryRun() {
+				hub.AddBreadcrumb(&sentry.Breadcrumb{
+					Message: line.Text,
+					Level:   sentry.LevelInfo,
+				}, nil)
+			}
+		}
+	}()
+
+	// Wait for killl signal broadcast.
+	cond.L.Lock()
+	for !_killed {
+		cond.Wait()
+	}
+	cond.L.Unlock()
+
+	// Gracefully handles Sentry flush and close file descriptors.
+	log.Debug().Msgf("Finished reading from %q, flushing events...", absFilePath)
 	hub.Flush(10 * time.Second)
 }
 
-func runWithConfig(config *Config) {
-	if isVerbose() {
-		log.Println("Verbose mode enabled, printing every match")
-	}
+func runWithConfig(config *Config, cond *sync.Cond) {
+	log.Debug().Msg("Verbose mode enabled, printing every match")
 
 	g := initGrokProcessor()
 
@@ -237,20 +240,24 @@ func runWithConfig(config *Config) {
 	for _, filename := range config.PatternFiles {
 		err := ReadPatternsFromFile(g, filename)
 		if err != nil {
-			log.Fatal(err)
+			log.Fatal().Err(err).Msg("Reading patterns from file")
 		}
-		log.Printf("Loaded additional patterns from \"%s\"\n", filename)
+		log.Info().Msgf("Loaded additional patterns from \"%s\"\n", filename)
 	}
 
 	if len(config.Inputs) == 0 {
-		log.Fatalln("No file inputs specified, aborting")
+		log.Fatal().Msg("No file inputs specified, aborting")
 	}
 
 	// Process file inputs
 	for _, fileInput := range config.Inputs {
-		wg.Add(1)
-		go processFile(&fileInput, g)
+		go processFile(&fileInput, g, cond)
 	}
 
-	wg.Wait()
+	// Wait for kill signal broadcast
+	cond.L.Lock()
+	for !_killed {
+		cond.Wait()
+	}
+	cond.L.Unlock()
 }
