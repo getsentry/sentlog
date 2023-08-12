@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/araddon/dateparse"
+	"github.com/getsentry/sentry-go"
 	"github.com/hpcloud/tail"
 	"github.com/rs/zerolog/log"
 	"github.com/vjeantet/grok"
