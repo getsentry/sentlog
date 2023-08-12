@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/araddon/dateparse"
-	"github.com/getsentry/sentry-go"
 	"github.com/hpcloud/tail"
 	"github.com/rs/zerolog/log"
 	"github.com/vjeantet/grok"
@@ -101,6 +100,7 @@ func initGrokProcessor() *grok.Grok {
 	if err := AddDefaultPatterns(g); err != nil {
 		log.Fatal().Err(err).Msg("Processing default patterns")
 	}
+
 	return g
 }
 
