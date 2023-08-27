@@ -90,4 +90,4 @@ inputs:
 
 `sentlog` uses [Grok patterns](https://www.elastic.co/guide/en/logstash/current/plugins-filters-grok.html#_grok_basics) to match your data. A cool thing about Grok expressions is that they can be nested, which lets you to define complex matching expressions based on smaller building blocks ([example](https://github.com/vjeantet/grok/blob/5a86c829f3c347ec23dbd632af2db0d3508c11ce/patterns/grok-patterns)).
 
-This Grok debugger can be quite helpful when preparing your Grok expressions: https://grokdebug.herokuapp.com/
+This Grok debugger can be quite helpful when preparing your Grok expressions: https://grokdebugger.com/
