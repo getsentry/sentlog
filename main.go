@@ -58,6 +58,9 @@ func initSentry(config *Config) {
 	}
 }
 
+// initLogging will initiate logging and convert every call made to log standard library
+// to be diverted to zerolog's io.Writer. This function requires _verbose global variable
+// to be set beforehand.
 func initLogging() {
 	log.Logger = log.Output(zerolog.ConsoleWriter{
 		Out: os.Stderr,
@@ -182,26 +185,21 @@ func main() {
 	log.Debug().Msg("Starting sentlog")
 	go runWithConfig(config, cond)
 
-	// Listen to SIGHUP for handling graceful restarts.
-	// This is most useful on avoiding logrotate not be able to rotate the log file.
+	// Listen to SIGHUP and SIGUSR1 for handling graceful restarts.
+	// This is most useful for re-opening log files sentlog's tailing.
 	// It's an unbuffered channel, you can send SIGHUP multiple times.
 	usrStopSignal := make(chan os.Signal)
-	signal.Notify(usrStopSignal, syscall.SIGHUP)
+	signal.Notify(usrStopSignal, syscall.SIGHUP, syscall.SIGUSR1)
 	go func() {
 		for {
-			log.Debug().Msg("Waiting for SIGHUP")
+			log.Debug().Msg("Waiting for SIGHUP/SIGUSR1")
 			<-usrStopSignal
 
-			log.Debug().Msg("Received SIGHUP")
+			log.Debug().Msg("Received SIGHUP/SIGUSR1")
 			cond.L.Lock()
 			_killed = true
 			cond.Broadcast()
 			cond.L.Unlock()
-
-			log.Debug().Msg("Sleeping for 10 seconds")
-			// NOTE: should this be configurable in the future?
-			time.Sleep(time.Second * 10)
-			log.Debug().Msg("Thread woke up, setting kill switch to false")
 
 			cond.L.Lock()
 			_killed = false
@@ -227,4 +225,5 @@ func main() {
 	// Sleep for 1 second to allow other goroutine to flush and exit properly
 	time.Sleep(time.Second)
 	sentry.Flush(5 * time.Second)
+	log.Debug().Msg("Shutting down sentlog")
 }
