@@ -7,7 +7,7 @@ require (
 	github.com/araddon/dateparse v0.0.0-20210429162001-6b43995a97de
 	github.com/getsentry/sentry-go v0.20.0
 	github.com/hpcloud/tail v1.0.1-0.20180514194441-a1dbeea552b7
-	github.com/sirupsen/logrus v1.9.0
+	github.com/sirupsen/logrus v1.9.1
 	github.com/stretchr/testify v1.8.2
 	github.com/vjeantet/grok v1.0.1
 	gopkg.in/yaml.v3 v3.0.1
